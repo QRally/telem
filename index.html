@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Live Recce Pace Logger Pro</title>
+  <meta name="description" content="Rally recce pace note generator with Web Bluetooth remote support, GPS curvature analysis, co-driver speech synthesis, and CSV export.">
+  <meta name="theme-color" content="#0d0d12">
+  <style>
+    :root {
+      --bg-color: #0d0d12;
+      --panel-bg: #161622;
+      --panel-card: #1c1c2b;
+      --accent-green: #00e676;
+      --accent-red: #ff1744;
+      --accent-blue: #29b6f6;
+      --accent-yellow: #ffd600;
+      --text-color: #f0f0f5;
+      --text-muted: #8b8b9e;
+      --border-color: #272738;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    
+    html, body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--panel-bg);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+
+    .stats-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .stat-box {
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+    }
+    .stat-lbl {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-val {
+      font-size: 1.25rem;
+      font-weight: 900;
+      font-family: var(--font-mono);
+      color: var(--accent-green);
+      line-height: 1.1;
+    }
+    .stat-val.acc {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+    }
+    .stat-val.acc.good { color: var(--accent-green); }
+    .stat-val.acc.warn { color: var(--accent-yellow); }
+    .stat-val.acc.bad { color: var(--accent-red); }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      background: #222232;
+      color: var(--accent-yellow);
+      border: 1px solid #3c3c50;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      letter-spacing: 0.5px;
+      transition: all 0.15s ease;
+    }
+    .mode-btn.easywrite {
+      color: var(--accent-blue);
+      border-color: var(--accent-blue);
+    }
+
+    .bt-btn {
+      background: #1c2738;
+      color: var(--accent-blue);
+      border: 1px solid #234870;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .bt-btn.active {
+      background: rgba(0, 230, 118, 0.15);
+      color: var(--accent-green);
+      border-color: rgba(0, 230, 118, 0.4);
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 12px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    #action-btn {
+      height: 120px;
+      flex-shrink: 0;
+      border: none;
+      border-radius: 16px;
+      background: var(--accent-green);
+      color: #000;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: transform 0.1s ease, background-color 0.2s ease;
+      box-shadow: 0 8px 24px rgba(0, 230, 118, 0.25);
+    }
+    #action-btn:active { transform: scale(0.985); }
+    #action-btn.recording {
+      background: var(--accent-red);
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(255, 23, 68, 0.35);
+      animation: pulse 1.4s infinite;
+    }
+    #btn-label {
+      font-size: 1.8rem;
+      font-weight: 900;
+      font-family: var(--font-mono);
+      letter-spacing: 1.5px;
+    }
+    #btn-subtext {
+      font-size: 0.82rem;
+      font-weight: 600;
+      opacity: 0.9;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(255, 23, 68, 0.7); }
+      70% { box-shadow: 0 0 0 16px rgba(255, 23, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 23, 68, 0); }
+    }
+
+    .feed-container {
+      flex: 1;
+      background: var(--panel-bg);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border-color);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .feed-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+    .feed-stats {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--accent-green);
+    }
+
+    .feed-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-right: 4px;
+      min-height: 0;
+    }
+
+    .feed-item {
+      background: var(--panel-card);
+      border-radius: 8px;
+      overflow: hidden;
+      border-left: 4px solid var(--accent-blue);
+      border: 1px solid var(--border-color);
+      border-left-width: 4px;
+      font-family: var(--font-mono);
+      flex-shrink: 0;
+    }
+    .feed-item.R { border-left-color: #ff3b30; }
+    .feed-item.L { border-left-color: #007aff; }
+    .feed-item.STRAIGHT { border-left-color: #34c759; }
+
+    .feed-item-main {
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .feed-call {
+      font-size: 1.3rem;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+    }
+    .feed-item.R .feed-call { color: #ff5252; }
+    .feed-item.L .feed-call { color: #448aff; }
+    .feed-item.STRAIGHT .feed-call { color: #00e676; }
+
+    .feed-meta {
+      font-size: 0.75rem;
+      color: #9999a8;
+      text-align: right;
+    }
+
+    .edit-drawer {
+      display: none;
+      background: #14141f;
+      padding: 10px;
+      border-top: 1px solid var(--border-color);
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .edit-drawer.open { display: grid; }
+    .edit-btn {
+      background: #252536;
+      color: #eee;
+      border: 1px solid #3c3c52;
+      padding: 8px 6px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+    }
+    .edit-btn:hover { background: #323249; }
+    .edit-btn.danger {
+      background: rgba(255, 23, 68, 0.2);
+      color: #ff5252;
+      border-color: rgba(255, 23, 68, 0.4);
+      grid-column: span 3;
+    }
+
+    #toast {
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e1e2d;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: 1px solid #3a3a50;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    #toast.show { opacity: 1; pointer-events: auto; }
+
+    footer {
+      padding: 10px 14px;
+      background: var(--panel-bg);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .btn-action {
+      flex: 1;
+      background: #252536;
+      color: #fff;
+      border: 1px solid #3c3c50;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.15s ease;
+    }
+    .btn-action:hover {
+      background: #323249;
+      border-color: var(--accent-green);
+    }
+    .btn-action.clear {
+      flex: 0 0 auto;
+      padding: 12px 16px;
+      color: #ff5252;
+      border-color: #55222a;
+    }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+      background: #181824;
+      border: 1px solid #353548;
+      border-radius: 14px;
+      width: 100%;
+      max-width: 500px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+    }
+    .modal-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #2a2a3a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+    .modal-body {
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .btn-modal {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .btn-modal.ble {
+      background: #1976d2;
+      color: #fff;
+      border-color: #2196f3;
+    }
+    .btn-modal.keeper {
+      background: #00e676;
+      color: #000;
+      border-color: #00e676;
+    }
+    .log-box {
+      background: #0a0a10;
+      border: 1px solid #252535;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      height: 140px;
+      overflow-y: auto;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="toast"></div>
+
+  <header>
+    <div class="stats-group">
+      <div class="stat-box" id="speed-toggle" title="Tap to toggle MPH / KMH">
+        <span class="stat-lbl" id="speed-unit-lbl">SPEED (MPH)</span>
+        <div class="stat-val" id="speed-val">0</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-lbl">GPS ACC</span>
+        <div class="stat-val acc" id="acc-val">--</div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <button class="mode-btn easywrite" id="mode-toggle-btn">MODE: EASYWRITE</button>
+      <button class="bt-btn" id="bt-modal-btn">⚡ BT REMOTE</button>
+    </div>
+  </header>
+
+  <main>
+    <button id="action-btn">
+      <span id="btn-label">START CORNER</span>
+      <p id="btn-subtext">Tap screen or click Bluetooth remote at turn-in</p>
+    </button>
+
+    <div class="feed-container">
+      <div class="feed-header">
+        <span>Captured Pace Notes (Tap to Edit)</span>
+        <span class="feed-stats" id="feed-stats">0 corners | 0m</span>
+      </div>
+      <div class="feed-list" id="feed-list">
+        <div style="text-align:center; padding:40px 20px; color:#666; font-size:0.85rem;">
+          Ready for stage recce.<br>Click Bluetooth remote or tap button at corner entry & exit.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <button class="btn-action clear" id="clear-btn" title="Clear notes">CLEAR</button>
+    <button class="btn-action" id="export-csv-btn">EXPORT CSV</button>
+  </footer>
+
+  <div class="modal-overlay" id="bt-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>Bluetooth & Remote Settings</span>
+        <button id="close-modal-btn" style="background:none; border:none; color:#aaa; font-size:1.2rem; cursor:pointer;">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:#aaa; font-size:0.8rem; line-height:1.4;">
+          <strong>1. Bluetooth Selfie Remote / Media Buttons:</strong><br>
+          Tap the button below to start the inaudible background audio loop. This unlocks iOS Safari & Android Chrome so Bluetooth clickers work smoothly.
+        </p>
+
+        <button class="btn-modal keeper" id="toggle-keeper-btn">Enable Mobile Remote Keeper</button>
+
+        <hr style="border:none; border-top:1px solid #2a2a3a; margin:4px 0;">
+
+        <p style="color:#aaa; font-size:0.8rem; line-height:1.4;">
+          <strong>2. Web Bluetooth GATT Buttons (Flic, ESP32, micro:bit):</strong><br>
+          Connect directly using the browser's native Web Bluetooth API.
+        </p>
+
+        <button class="btn-modal ble" id="scan-ble-btn">Pair Web Bluetooth Device</button>
+
+        <div style="font-size:0.75rem; color:#888; margin-top:4px;">
+          Live Remote Event Monitor:
+        </div>
+        <div class="log-box" id="log-box">Listening for remote keys (Space, Enter, Media, BLE)...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let calibrationMode = 'easywrite';
+    let speedUnit = 'mph';
+    let wakeLock = null;
+    let isRecordingCorner = false;
+    let currentCornerPoints = [];
+    let capturedNotes = [];
+    let rollingBuffer = [];
+    let lastCornerEndPoint = null;
+    let totalStageDistance = 0;
+    let activeEditIndex = null;
+    let bleDevice = null;
+    let silentAudioElement = null;
+    let silentAudioActive = false;
+    let lastTriggerTime = 0;
+
+    const actionBtn = document.getElementById('action-btn');
+    const btnLabel = document.getElementById('btn-label');
+    const btnSubtext = document.getElementById('btn-subtext');
+    const feedList = document.getElementById('feed-list');
+    const feedStats = document.getElementById('feed-stats');
+    const speedVal = document.getElementById('speed-val');
+    const accVal = document.getElementById('acc-val');
+    const speedToggle = document.getElementById('speed-toggle');
+    const speedUnitLbl = document.getElementById('speed-unit-lbl');
+    const modeToggleBtn = document.getElementById('mode-toggle-btn');
+    const btModalBtn = document.getElementById('bt-modal-btn');
+    const btModal = document.getElementById('bt-modal');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const toggleKeeperBtn = document.getElementById('toggle-keeper-btn');
+    const scanBleBtn = document.getElementById('scan-ble-btn');
+    const logBox = document.getElementById('log-box');
+    const exportCsvBtn = document.getElementById('export-csv-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const toast = document.getElementById('toast');
+
+    function showToast(msg) {
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    function addLog(msg) {
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.innerText = '[' + time + '] ' + msg;
+      logBox.insertBefore(div, logBox.firstChild);
+    }
+
+    speedToggle.addEventListener('click', () => {
+      speedUnit = speedUnit === 'mph' ? 'kmh' : 'mph';
+      speedUnitLbl.innerText = 'SPEED (' + speedUnit.toUpperCase() + ')';
+    });
+
+    modeToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (calibrationMode === 'easywrite') {
+        calibrationMode = 'standard';
+        modeToggleBtn.innerText = 'MODE: STANDARD';
+        modeToggleBtn.classList.remove('easywrite');
+        showToast('Mode: Standard (6=Flat, 1=Hairpin)');
+      } else {
+        calibrationMode = 'easywrite';
+        modeToggleBtn.innerText = 'MODE: EASYWRITE';
+        modeToggleBtn.classList.add('easywrite');
+        showToast('Mode: EasyWrite (1=Hairpin, 6=Flat)');
+      }
+    });
+
+    btModalBtn.addEventListener('click', () => btModal.classList.add('open'));
+    closeModalBtn.addEventListener('click', () => btModal.classList.remove('open'));
+    btModal.addEventListener('click', (e) => {
+      if (e.target === btModal) btModal.classList.remove('open');
+    });
+
+    async function toggleSilentAudio() {
+      if (silentAudioActive && silentAudioElement) {
+        silentAudioElement.pause();
+        silentAudioActive = false;
+        toggleKeeperBtn.innerText = 'Enable Mobile Remote Keeper';
+        toggleKeeperBtn.style.background = '#00e676';
+        addLog('Silent audio keeper disabled');
+        return;
+      }
+
+      try {
+        if (!silentAudioElement) {
+          const silentWav = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+          silentAudioElement = new Audio(silentWav);
+          silentAudioElement.loop = true;
+          silentAudioElement.volume = 0.01;
+          silentAudioElement.setAttribute('playsinline', 'true');
+        }
+
+        await silentAudioElement.play();
+        silentAudioActive = true;
+        toggleKeeperBtn.innerText = 'Mobile Remote Keeper: ACTIVE';
+        toggleKeeperBtn.style.background = '#ffd600';
+        btModalBtn.classList.add('active');
+        addLog('Silent audio keeper ACTIVE. MediaSession unlocked for BT clickers!');
+        showToast('Remote Keeper Active! Hardware BT clickers unlocked.');
+      } catch (err) {
+        addLog('Silent audio failed: ' + err.message);
+      }
+    }
+    toggleKeeperBtn.addEventListener('click', toggleSilentAudio);
+
+    scanBleBtn.addEventListener('click', async () => {
+      if (!navigator.bluetooth) {
+        showToast('Web Bluetooth not supported in this browser (use Chrome/Edge)');
+        return;
+      }
+
+      try {
+        addLog('Scanning for Web Bluetooth devices...');
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            'battery_service',
+            0x180f,
+            0x1812,
+            0xffe0,
+            '0000ffe0-0000-1000-8000-00805f9b34fb',
+            '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
+          ]
+        });
+
+        bleDevice = device;
+        addLog('Selected: ' + (device.name || 'BLE Device'));
+        const server = await device.gatt.connect();
+        addLog('Connected to GATT server on ' + (device.name || 'Device') + '!');
+        btModalBtn.classList.add('active');
+        btModalBtn.innerText = '⚡ ' + (device.name || 'BT Connected');
+
+        device.addEventListener('gattserverdisconnected', () => {
+          addLog('BLE Device disconnected.');
+          btModalBtn.classList.remove('active');
+          btModalBtn.innerText = '⚡ BT REMOTE';
+        });
+
+        const services = await server.getPrimaryServices();
+        for (const s of services) {
+          try {
+            const chars = await s.getCharacteristics();
+            for (const ch of chars) {
+              if (ch.properties.notify || ch.properties.indicate) {
+                await ch.startNotifications();
+                ch.addEventListener('characteristicvaluechanged', () => {
+                  addLog('BLE button packet received!');
+                  handleTriggerEvent('BLE GATT Notification');
+                });
+                addLog('Listening on char: ' + ch.uuid.slice(0, 8) + '...');
+              }
+            }
+          } catch (e) {}
+        }
+        showToast('Connected to ' + (device.name || 'BLE Device') + '!');
+      } catch (err) {
+        addLog('BLE error: ' + err.message);
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      const isRemoteKey =
+        e.code === 'Space' || e.code === 'Enter' ||
+        e.key === ' ' || e.key === 'Enter' ||
+        e.keyCode === 32 || e.keyCode === 13 ||
+        e.key === 'MediaPlayPause' || e.key === 'MediaTrackNext' || e.key === 'MediaTrackPrevious' ||
+        e.key === 'VolumeUp' || e.key === 'VolumeDown' ||
+        e.key === 'r' || e.key === 'R';
+
+      if (isRemoteKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTriggerEvent('Key: ' + (e.code || e.key));
+      }
+    }, { capture: true });
+
+    if ('mediaSession' in navigator) {
+      try {
+        const onMedia = (action) => () => {
+          handleTriggerEvent('MediaSession: ' + action);
+        };
+        navigator.mediaSession.setActionHandler('play', onMedia('play'));
+        navigator.mediaSession.setActionHandler('pause', onMedia('pause'));
+        navigator.mediaSession.setActionHandler('previoustrack', onMedia('prev'));
+        navigator.mediaSession.setActionHandler('nexttrack', onMedia('next'));
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: 'Live Recce Logger Pro',
+          artist: 'Rally Co-Driver Active'
+        });
+      } catch (err) {
+        console.warn('MediaSession handler error:', err);
+      }
+    }
+
+    function handleTriggerEvent(source) {
+      const now = Date.now();
+      if (now - lastTriggerTime < 350) return;
+      lastTriggerTime = now;
+
+      addLog('Trigger: ' + source);
+      triggerAction();
+    }
+
+    let audioCtx = null;
+    function getAudioContext() {
+      if (!audioCtx) {
+        const AudioClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function playBeep(freq, duration = 0.15, type = 'sine') {
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+      } catch (err) {}
+    }
+
+    function playExitChord() {
+      playBeep(520, 0.12, 'sine');
+      setTimeout(() => playBeep(780, 0.16, 'sine'), 80);
+    }
+
+    function speakCall(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        let spoken = text
+          .replace(/\bR(\d)/g, 'Right $1')
+          .replace(/\bL(\d)/g, 'Left $1')
+          .replace(/LONG/g, 'long')
+          .replace(/TIGHTENS/g, 'tightens')
+          .replace(/OPENS/g, 'opens');
+
+        if (/^\d+$/.test(text.trim())) spoken = text + ' meters';
+
+        const u = new SpeechSynthesisUtterance(spoken);
+        u.rate = 1.15;
+        window.speechSynthesis.speak(u);
+      }
+    }
+
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator && !wakeLock) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => { wakeLock = null; });
+        } catch (e) {}
+      }
+    }
+
+    function triggerAction() {
+      getAudioContext();
+      requestWakeLock();
+
+      if (!isRecordingCorner) {
+        isRecordingCorner = true;
+        actionBtn.classList.add('recording');
+        btnLabel.innerText = 'REC...';
+        btnSubtext.innerText = 'Driving through bend (Click remote on exit)';
+        playBeep(880, 0.15);
+        currentCornerPoints = [...rollingBuffer];
+      } else {
+        isRecordingCorner = false;
+        actionBtn.classList.remove('recording');
+
+        if (currentCornerPoints.length >= 3) {
+          processCapturedCorner(currentCornerPoints);
+          playExitChord();
+        } else {
+          showToast('Not enough GPS points captured. Drive further through the bend.');
+          playBeep(220, 0.25, 'sawtooth');
+        }
+
+        btnLabel.innerText = 'START CORNER';
+        btnSubtext.innerText = 'Tap screen or click Bluetooth remote at turn-in';
+        currentCornerPoints = [];
+      }
+    }
+
+    actionBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleTriggerEvent('Screen Tap');
+    });
+
+    function evaluateCorner(rawPoints) {
+      const points = [];
+      points.push(rawPoints[0]);
+      for (let i = 1; i < rawPoints.length; i++) {
+        if (haversine(points[points.length - 1], rawPoints[i]) >= 1.5) {
+          points.push(rawPoints[i]);
+        }
+      }
+
+      if (points.length < 3) {
+        return { dir: 'R', grade: 6, text: 'R6', segmentLen: 20, isLong: false, radiusMeters: 150 };
+      }
+
+      const metric = projectToMeters(points);
+      let minR = 99999;
+      let rCount = 0, lCount = 0;
+      const radii = [];
+
+      for (let i = 1; i < metric.length - 1; i++) {
+        const p1 = metric[i - 1], p2 = metric[i], p3 = metric[i + 1];
+        const a = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const b = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+        const c = Math.hypot(p3.x - p1.x, p3.y - p1.y);
+        const cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+        const area = Math.abs(cross) / 2;
+
+        if (cross > 0) lCount++; else if (cross < 0) rCount++;
+
+        if (area > 0.05 && a > 1 && b > 1 && c > 1) {
+          const r = (a * b * c) / (4 * area);
+          if (r > 3 && r < 500) {
+            radii.push(r);
+            if (r < minR) minR = r;
+          }
+        }
+      }
+
+      if (minR === 99999) minR = 150;
+      const dir = rCount >= lCount ? 'R' : 'L';
+
+      let grade = 6;
+      if (calibrationMode === 'easywrite') {
+        if (minR < 16) grade = 1;
+        else if (minR < 32) grade = 2;
+        else if (minR < 58) grade = 3;
+        else if (minR < 90) grade = 4;
+        else if (minR < 135) grade = 5;
+        else grade = 6;
+      } else {
+        if (minR < 18) grade = 1;
+        else if (minR < 35) grade = 2;
+        else if (minR < 65) grade = 3;
+        else if (minR < 95) grade = 4;
+        else if (minR < 140) grade = 5;
+        else grade = 6;
+      }
+
+      let totalCornerMeters = 0;
+      for (let i = 1; i < points.length; i++) {
+        totalCornerMeters += haversine(points[i - 1], points[i]);
+      }
+
+      let longThreshold = 75;
+      if (grade <= 2) longThreshold = 45;
+      else if (grade <= 4) longThreshold = 80;
+      else longThreshold = 130;
+
+      const isLong = totalCornerMeters > longThreshold;
+      const modifier = isLong ? ' LONG' : '';
+
+      return {
+        dir,
+        grade,
+        isLong,
+        text: dir + grade + modifier,
+        segmentLen: Math.round(totalCornerMeters),
+        radiusMeters: Math.round(minR)
+      };
+    }
+
+    function processCapturedCorner(points) {
+      if (lastCornerEndPoint && points.length > 0) {
+        const dMeters = haversine(lastCornerEndPoint, points[0]);
+        const straightDistCall = Math.round(dMeters / 10) * 10;
+        totalStageDistance += dMeters;
+
+        if (straightDistCall >= 30) {
+          capturedNotes.push({
+            id: Math.random().toString(36).substring(2, 8),
+            type: 'STRAIGHT',
+            text: '' + straightDistCall,
+            segmentLen: Math.round(dMeters),
+            accumDist: Math.round(totalStageDistance)
+          });
+        }
+      }
+
+      const res = evaluateCorner(points);
+      totalStageDistance += res.segmentLen;
+
+      capturedNotes.push({
+        id: Math.random().toString(36).substring(2, 8),
+        type: res.dir,
+        dir: res.dir,
+        grade: res.grade,
+        isLong: res.isLong,
+        text: res.text,
+        segmentLen: res.segmentLen,
+        accumDist: Math.round(totalStageDistance),
+        radiusMeters: res.radiusMeters,
+        coords: points
+      });
+
+      speakCall(res.text);
+      lastCornerEndPoint = points[points.length - 1];
+      activeEditIndex = null;
+      renderFeed();
+    }
+
+    function renderFeed() {
+      feedList.innerHTML = '';
+      const cornerCount = capturedNotes.filter(n => n.type !== 'STRAIGHT').length;
+      feedStats.innerText = cornerCount + ' corners | ' + Math.round(totalStageDistance) + 'm';
+
+      if (capturedNotes.length === 0) {
+        feedList.innerHTML = '<div style="text-align:center; padding:40px 20px; color:#666; font-size:0.85rem;">Ready for stage recce.<br>Click Bluetooth remote or tap button at corner entry & exit.</div>';
+        return;
+      }
+
+      [...capturedNotes].reverse().forEach((note, revIdx) => {
+        const actualIndex = capturedNotes.length - 1 - revIdx;
+        const isOpen = activeEditIndex === actualIndex;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'feed-item ' + note.type;
+
+        const mainRow = document.createElement('div');
+        mainRow.className = 'feed-item-main';
+        mainRow.innerHTML = 
+          '<div style="display:flex; align-items:center; gap:10px;">' +
+            '<span style="font-size:0.75rem; color:#666;">#' + (actualIndex + 1) + '</span>' +
+            '<div class="feed-call">' + note.text + '</div>' +
+          '</div>' +
+          '<div class="feed-meta">' +
+            '<div style="color:#eee; font-weight:700;">+' + note.accumDist + 'm</div>' +
+            '<div>' + note.segmentLen + 'm len ' + (note.radiusMeters ? '| R:' + note.radiusMeters + 'm' : '') + '</div>' +
+          '</div>';
+        mainRow.addEventListener('click', () => {
+          activeEditIndex = activeEditIndex === actualIndex ? null : actualIndex;
+          renderFeed();
+        });
+        wrapper.appendChild(mainRow);
+
+        if (isOpen) {
+          const drawer = document.createElement('div');
+          drawer.className = 'edit-drawer open';
+          if (note.type !== 'STRAIGHT') {
+            drawer.innerHTML = 
+              '<button class="edit-btn" data-action="toggleDir">Switch R/L</button>' +
+              '<button class="edit-btn" data-action="tighter">- Tighter</button>' +
+              '<button class="edit-btn" data-action="wider">+ Wider</button>' +
+              '<button class="edit-btn" data-action="toggleLong">Toggle LONG</button>' +
+              '<button class="edit-btn" style="grid-column: span 2;" data-action="close">Done</button>' +
+              '<button class="edit-btn danger" data-action="delete">Delete Note</button>';
+          } else {
+            drawer.innerHTML = '<button class="edit-btn danger" data-action="delete">Delete Straight</button>';
+          }
+
+          drawer.addEventListener('click', (e) => {
+            const act = e.target.getAttribute('data-action');
+            if (act) modifyNote(actualIndex, act);
+          });
+          wrapper.appendChild(drawer);
+        }
+
+        feedList.appendChild(wrapper);
+      });
+    }
+
+    function modifyNote(index, action) {
+      const note = capturedNotes[index];
+      if (action === 'close') {
+        activeEditIndex = null;
+        renderFeed();
+        return;
+      }
+      if (action === 'delete') {
+        capturedNotes.splice(index, 1);
+        activeEditIndex = null;
+        renderFeed();
+        return;
+      }
+      if (note.type === 'STRAIGHT') return;
+
+      if (action === 'tighter' && note.grade > 1) note.grade--;
+      if (action === 'wider' && note.grade < 6) note.grade++;
+      if (action === 'toggleLong') note.isLong = !note.isLong;
+      if (action === 'toggleDir') {
+        note.dir = note.dir === 'R' ? 'L' : 'R';
+        note.type = note.dir;
+      }
+
+      note.text = '' + note.dir + note.grade + (note.isLong ? ' LONG' : '');
+      speakCall(note.text);
+      renderFeed();
+    }
+
+    function haversine(p1, p2) {
+      const R = 6371000;
+      const toRad = Math.PI / 180;
+      const dLat = (p2.lat - p1.lat) * toRad;
+      const dLon = (p2.lon - p1.lon) * toRad;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(p1.lat * toRad) * Math.cos(p2.lat * toRad) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function projectToMeters(points) {
+      const R = 6371000;
+      const toRad = Math.PI / 180;
+      const origin = points[0];
+      const lat0 = origin.lat * toRad;
+      return points.map(p => ({
+        x: (p.lon - origin.lon) * toRad * R * Math.cos(lat0),
+        y: (p.lat - origin.lat) * toRad * R
+      }));
+    }
+
+    function startGPS() {
+      if (!('geolocation' in navigator)) {
+        showToast('Geolocation is not supported by your device.');
+        return;
+      }
+
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          const accuracy = Math.round(pos.coords.accuracy);
+          const rawSpeed = pos.coords.speed || 0;
+          const speed = speedUnit === 'mph' ? Math.round(rawSpeed * 2.23694) : Math.round(rawSpeed * 3.6);
+          const timestamp = pos.timestamp;
+
+          accVal.innerText = '±' + accuracy + 'm';
+          accVal.className = 'stat-val acc ' + (accuracy <= 6 ? 'good' : accuracy <= 15 ? 'warn' : 'bad');
+          speedVal.innerText = speed;
+
+          const pt = { lat, lon, timestamp, speed: rawSpeed, accuracy };
+
+          rollingBuffer.push(pt);
+          while (rollingBuffer.length > 0 && (timestamp - rollingBuffer[0].timestamp) > 2000) {
+            rollingBuffer.shift();
+          }
+
+          if (isRecordingCorner) {
+            currentCornerPoints.push(pt);
+            if (currentCornerPoints.length >= 3) {
+              const preview = evaluateCorner(currentCornerPoints);
+              btnLabel.innerText = preview.text;
+            }
+          }
+        },
+        (err) => console.warn('GPS Error:', err),
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 6000 }
+      );
+    }
+
+    exportCsvBtn.addEventListener('click', () => {
+      if (!capturedNotes.length) {
+        showToast('No pace notes captured yet.');
+        return;
+      }
+
+      let csv = "Index,Type,Note Call,Segment Length (m),Cumulative Distance (m),Radius (m)\n";
+      capturedNotes.forEach((n, idx) => {
+        csv += (idx + 1) + ',' + n.type + ',"' + n.text + '",' + n.segmentLen + ',' + n.accumDist + ',' + (n.radiusMeters || '') + '\n';
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = 'recce_pace_notes_' + Date.now() + '.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('CSV downloaded successfully!');
+    });
+
+    clearBtn.addEventListener('click', () => {
+      if (!capturedNotes.length) return;
+      capturedNotes = [];
+      totalStageDistance = 0;
+      lastCornerEndPoint = null;
+      activeEditIndex = null;
+      renderFeed();
+      showToast('Stage cleared.');
+    });
+
+    startGPS();
+  </script>
+</body>
+</html>

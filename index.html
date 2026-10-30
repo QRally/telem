@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Live Recce Pace Logger Pro</title>
+  <title>Live Recce Logger Pro</title>
   <meta name="description" content="Professional rally recce pace note generator with 6-is-fastest pacenotes, corner angle and radius analysis, map view with blue flags, GPX and CSV export, Web Bluetooth clicker, and co-driver voice.">
   <meta name="theme-color" content="#0d0d12">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -275,7 +276,7 @@
     }
     #map-view.active { display: block; }
 
-    /* Custom Leaflet popup matching user screenshot */
+    /* Custom Leaflet popup styling */
     .leaflet-popup-content-wrapper {
       background: #ffffff !important;
       color: #111827 !important;
@@ -407,7 +408,7 @@
       color: #aaa;
     }
   </style>
-<script src="/_aistudio-iframe.js?v=1f94f900"></script></head>
+</head>
 <body>
 
   <div id="toast"></div>
@@ -496,7 +497,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // ORIGINAL EASYWRITE CALIBRATION SETTINGS (6 IS FASTEST, 1 IS SLOWEST)
+    // EASYWRITE CALIBRATION SETTINGS (6 IS FASTEST, 1 IS SLOWEST)
     const calibration = {
       hairpinRadiusMax: 20,
       hairpinAngleMin: 100,
@@ -505,7 +506,6 @@
       grade3RadiusMax: 85,  // Grade 3
       grade4RadiusMax: 150, // Grade 4
       grade5RadiusMax: 260, // Grade 5
-      // Grade 6 = Fastest (Radius > 260m or fast flat kink)
       chordStepMeters: 5,
       tightenRatioThreshold: 0.65,
       opensRatioThreshold: 1.5
@@ -516,7 +516,6 @@
     let isRecordingCorner = false;
     let currentCornerPoints = [];
     
-    // Starts completely empty - NO preloaded stage
     let capturedNotes = [];
     let allStageTrackPoints = [];
     let rollingBuffer = [];
@@ -528,7 +527,7 @@
     let silentAudioActive = false;
     let lastTriggerTime = 0;
     let audioCtx = null;
-    let currentActiveView = 'feed'; // 'feed' or 'map'
+    let currentActiveView = 'feed';
 
     // Leaflet Map state
     let map = null;
@@ -749,7 +748,6 @@
       setTimeout(() => playBeep(780, 0.16, 'sine'), 70);
     }
 
-    // SPEECH SYNTHESIS: Directly speaks "Right 4", "Left 5", "Hairpin Left", etc.
     function speakCall(text) {
       if (!('speechSynthesis' in window)) return;
       try {
@@ -777,6 +775,12 @@
         if (eng) u.voice = eng;
         window.speechSynthesis.speak(u);
       } catch (err) {}
+    }
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
     }
 
     async function requestWakeLock() {
@@ -822,7 +826,6 @@
       handleTriggerEvent('Screen Tap');
     });
 
-    // CORNER ANGLE & RADIUS EVALUATOR (Strictly 6 = Fastest, 1 = Slowest)
     function evaluateCorner(rawPoints) {
       if (rawPoints.length < 3) {
         return { dir: 'R', grade: 6, text: 'R6', spoken: 'Right 6', segmentLen: 20, radiusMeters: 300, deflectionDeg: 10 };
@@ -846,7 +849,6 @@
 
       const n = points.length;
 
-      // Calculate cumulative turn angle & overall net deflection
       let totalDefl = 0;
       for (let i = 0; i < points.length - 1; i++) {
         const b1 = calculateBearing(points[i], points[i + 1]);
@@ -879,7 +881,7 @@
 
         if (area > 0.06 && a > 1.2 && b > 1.2 && c > 2.0) {
           const r = (a * b * c) / (4 * area);
-          if (r >= 4 && r <= 700) {
+          if (r >= 4 && r <= 700 && !isNaN(r)) {
             radii.push({ r, idx: i });
           }
         }
@@ -892,8 +894,6 @@
 
       const absDefl = Math.round(Math.max(Math.abs(totalDefl), Math.abs(netDefl)));
 
-      // RELIABLE DIRECTION:
-      // Compass Azimuth (0°=N, 90°=E): Clockwise turn is Right (defl > 0), Counter-clockwise is Left (defl < 0).
       let dir = 'R';
       if (Math.abs(totalDefl) >= 4) {
         dir = totalDefl > 0 ? 'R' : 'L';
@@ -913,7 +913,7 @@
         const topN = Math.min(3, radii.length);
         let sumInv = 0;
         for (let k = 0; k < topN; k++) sumInv += 1 / radii[k].r;
-        apexR = Math.round(topN / sumInv);
+        apexR = Math.round(topN / (sumInv || 1));
 
         const third = Math.floor(metric.length / 3);
         const entryGroup = radii.filter(x => x.idx <= third);
@@ -927,7 +927,6 @@
       const isHairpin = (absDefl >= calibration.hairpinAngleMin && apexR <= calibration.hairpinRadiusMax);
       const isSquare = (!isHairpin && absDefl >= 75 && absDefl <= 110 && apexR <= calibration.grade1RadiusMax * 1.2);
 
-      // PACENOTE SYSTEM: 6 IS FASTEST (FLAT / OPEN), 1 IS SLOWEST (TIGHT / SQUARE)
       let grade = 6;
       if (apexR <= calibration.grade1RadiusMax) grade = 1;
       else if (apexR <= calibration.grade2RadiusMax) grade = 2;
@@ -936,7 +935,6 @@
       else if (apexR <= calibration.grade5RadiusMax) grade = 5;
       else grade = 6;
 
-      // If angle is large (> 85 deg), adjust speed grade down by 1 if not already tight
       if (absDefl > 85 && grade > 2 && !isHairpin && !isSquare) {
         grade = Math.max(1, grade - 1);
       }
@@ -1005,7 +1003,6 @@
       return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
 
-    // PROCESS CORNER: Every button press creates a corner call (no distance-only interruptions)
     function processCapturedCorner(points) {
       let leadStraightDist = 0;
       if (lastCornerEndPoint && points.length > 0) {
@@ -1037,7 +1034,6 @@
 
       allStageTrackPoints.push(...points);
 
-      // ALWAYS speaks the corner note immediately! Never speaks distance!
       speakCall(res.spoken);
 
       lastCornerEndPoint = points[points.length - 1];
@@ -1130,7 +1126,6 @@
         return;
       }
 
-      // In 6-is-fastest: tighter = lower grade number (e.g. 5 -> 4), faster = higher grade number (e.g. 4 -> 5)
       if (action === 'tighter' && note.grade > 1) note.grade--;
       if (action === 'wider' && note.grade < 6) note.grade++;
       if (action === 'toggleLong') {
@@ -1174,7 +1169,6 @@
       }));
     }
 
-    // LEAFLET MAP: Corner blue flags with angle & radius popup
     function initOrUpdateMap(targetNoteIndex = null) {
       if (!map) {
         map = L.map('map-view', { zoomControl: true, attributionControl: false }).setView([52.120, -4.078], 15);
@@ -1296,7 +1290,6 @@
       );
     }
 
-    // GPX EXPORT FUNCTIONALITY
     exportGpxBtn.addEventListener('click', () => {
       if (!capturedNotes.length) {
         showToast('No stage data to export yet.');
@@ -1375,7 +1368,6 @@
       showToast('GPX route downloaded successfully!');
     });
 
-    // CSV EXPORT FUNCTIONALITY
     exportCsvBtn.addEventListener('click', () => {
       if (!capturedNotes.length) {
         showToast('No pace notes captured yet.');

@@ -121,8 +121,9 @@
       position: relative;
     }
 
+    /* Action button is pinned at top of main, visible across all views */
     #action-btn {
-      height: 115px;
+      height: 105px;
       flex-shrink: 0;
       border: none;
       border-radius: 14px;
@@ -306,6 +307,9 @@
       pointer-events: none;
       transition: opacity 0.2s ease;
       white-space: nowrap;
+      max-width: 90vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     #toast.show { opacity: 1; pointer-events: auto; }
 
@@ -425,7 +429,7 @@
     </div>
 
     <div class="header-controls">
-      <button class="btn-top view-active" id="view-toggle-btn">🗺️ MAP</button>
+      <button class="btn-top" id="view-toggle-btn">🗺️ MAP</button>
       <div class="mode-badge" title="6 is Fastest (Flat out), 1 is Slowest (Square/Hairpin)">
         6 = FASTEST
       </div>
@@ -434,12 +438,13 @@
   </header>
 
   <main>
-    <div id="feed-view-wrap" style="display:flex; flex-direction:column; gap:10px; flex:1; min-height:0;">
-      <button id="action-btn">
-        <span id="btn-label">START CORNER</span>
-        <p id="btn-subtext">Click Bluetooth remote or tap screen at turn-in</p>
-      </button>
+    <!-- ACTION BUTTON IS PINNED ABOVE BOTH FEED AND MAP -->
+    <button id="action-btn">
+      <span id="btn-label">START CORNER</span>
+      <p id="btn-subtext">Click Bluetooth remote or tap screen at turn-in</p>
+    </button>
 
+    <div id="feed-view-wrap" style="display:flex; flex-direction:column; gap:10px; flex:1; min-height:0;">
       <div class="feed-container">
         <div class="feed-header">
           <span>Captured Pace Notes</span>
@@ -464,7 +469,7 @@
     </div>
   </footer>
 
-  <!-- BLUETOOTH MODAL -->
+  <!-- BLUETOOTH & REMOTE MODAL -->
   <div class="modal-overlay" id="bt-modal">
     <div class="modal-card">
       <div class="modal-header">
@@ -472,23 +477,24 @@
         <button id="close-bt-modal-btn" style="background:none; border:none; color:#aaa; font-size:1.2rem; cursor:pointer;">&times;</button>
       </div>
       <div class="modal-body">
-        <p style="color:#aaa; font-size:0.75rem; line-height:1.4;">
-          <strong>1. Bluetooth Camera Clickers / Media Buttons:</strong><br>
-          Enable the silent audio keeper so iOS Safari and Android Chrome keep the remote alive even if screen dims or vehicle is stationary.
-        </p>
+        <div style="background:#1b1b28; border:1px solid #2b2b40; border-radius:8px; padding:10px;">
+          <strong style="color:var(--accent-green); font-size:0.82rem;">Standard Camera Buttons / Media Clickers:</strong>
+          <p style="color:#aaa; font-size:0.75rem; line-height:1.4; margin-top:4px;">
+            1. Pair your clicker directly in phone <strong>OS Bluetooth Settings</strong>.<br>
+            2. Tap button below to activate the background audio keeper (preserves clicker response if phone sleeps).
+          </p>
+          <button class="btn-modal keeper" id="toggle-keeper-btn" style="margin-top:8px;">Enable Mobile Remote Keeper</button>
+        </div>
 
-        <button class="btn-modal keeper" id="toggle-keeper-btn">Enable Mobile Remote Keeper</button>
+        <div style="background:#1b1b28; border:1px solid #2b2b40; border-radius:8px; padding:10px;">
+          <strong style="color:var(--accent-blue); font-size:0.82rem;">Custom Microcontroller / BLE GATT Buttons:</strong>
+          <p style="color:#aaa; font-size:0.75rem; line-height:1.4; margin-top:4px;">
+            For custom micro:bit, ESP32, Nordic UART, or Flic custom GATT buttons.
+          </p>
+          <button class="btn-modal ble" id="scan-ble-btn" style="margin-top:8px;">Pair Custom Web Bluetooth Device</button>
+        </div>
 
-        <hr style="border:none; border-top:1px solid #28283a; margin:4px 0;">
-
-        <p style="color:#aaa; font-size:0.75rem; line-height:1.4;">
-          <strong>2. Web Bluetooth GATT Buttons (Flic, ESP32, micro:bit):</strong><br>
-          Direct native BLE connection via Chrome/Edge.
-        </p>
-
-        <button class="btn-modal ble" id="scan-ble-btn">Pair Web Bluetooth Device</button>
-
-        <div style="font-size:0.72rem; color:#888; margin-top:2px;">Live Remote Event Monitor:</div>
+        <div style="font-size:0.72rem; color:#888;">Live Remote Event Monitor:</div>
         <div class="log-box" id="log-box">Listening for Space, Enter, Media, Volume, BLE...</div>
       </div>
     </div>
@@ -496,7 +502,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // EASYWRITE CALIBRATION SETTINGS (6 IS FASTEST, 1 IS SLOWEST)
+    // EASYWRITE PACENOTE CALIBRATION (6 IS FASTEST, 1 IS SLOWEST)
     const calibration = {
       hairpinRadiusMax: 20,
       hairpinAngleMin: 100,
@@ -519,6 +525,7 @@
     let allStageTrackPoints = [];
     let rollingBuffer = [];
     let lastCornerEndPoint = null;
+    let lastKnownHeading = null;
     let totalStageDistance = 0;
     let activeEditIndex = null;
     let bleDevice = null;
@@ -579,12 +586,14 @@
         currentActiveView = 'map';
         feedViewWrap.style.display = 'none';
         mapView.classList.add('active');
+        viewToggleBtn.classList.add('view-active');
         viewToggleBtn.innerText = '📋 FEED';
         initOrUpdateMap();
       } else {
         currentActiveView = 'feed';
         feedViewWrap.style.display = 'flex';
         mapView.classList.remove('active');
+        viewToggleBtn.classList.remove('view-active');
         viewToggleBtn.innerText = '🗺️ MAP';
       }
     });
@@ -620,7 +629,7 @@
         toggleKeeperBtn.innerText = 'Mobile Remote Keeper: ACTIVE';
         toggleKeeperBtn.style.background = '#ffd600';
         btModalBtn.classList.add('active');
-        addLog('Remote keeper ACTIVE. MediaSession background clickers active!');
+        addLog('Remote keeper ACTIVE. Background clickers unlocked!');
         showToast('Remote Keeper Active! Bluetooth clickers unlocked.');
       } catch (err) {
         addLog('Silent audio failed: ' + err.message);
@@ -635,11 +644,11 @@
       }
 
       try {
-        addLog('Scanning for Web Bluetooth devices...');
+        addLog('Scanning for custom BLE GATT devices...');
         const device = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
           optionalServices: [
-            'battery_service', 0x180f, 0x1812, 0xffe0,
+            'battery_service', 0x180f, 0xffe0,
             '0000ffe0-0000-1000-8000-00805f9b34fb',
             '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
           ]
@@ -791,6 +800,13 @@
       }
     }
 
+    // Auto-renew wake lock if tab visibility returns
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    });
+
     function triggerAction() {
       getAudioContext();
       requestWakeLock();
@@ -801,16 +817,19 @@
         btnLabel.innerText = 'REC...';
         btnSubtext.innerText = 'Driving through bend (Click remote on exit)';
         playBeep(880, 0.14);
-        currentCornerPoints = [...rollingBuffer];
+
+        // Seed with at most the single latest entry point to retain turn-in vector
+        currentCornerPoints = rollingBuffer.length > 0 ? [rollingBuffer[rollingBuffer.length - 1]] : [];
       } else {
         isRecordingCorner = false;
         actionBtn.classList.remove('recording');
 
-        if (currentCornerPoints.length >= 3) {
+        // Handle even fast corners with 2 points gracefully
+        if (currentCornerPoints.length >= 2) {
           processCapturedCorner(currentCornerPoints);
           playExitChord();
         } else {
-          showToast('Not enough GPS points captured. Drive further through the bend.');
+          showToast('Need at least 2 GPS fixes. Maintain speed or drive further through bend.');
           playBeep(200, 0.25, 'sawtooth');
         }
 
@@ -826,8 +845,53 @@
     });
 
     function evaluateCorner(rawPoints) {
-      if (rawPoints.length < 3) {
+      if (rawPoints.length < 2) {
         return { dir: 'R', grade: 6, text: 'R6', spoken: 'Right 6', segmentLen: 20, radiusMeters: 300, deflectionDeg: 10 };
+      }
+
+      // 2-POINT FALLBACK EVALUATION (FOR FAST BENDS OR 1Hz GPS)
+      if (rawPoints.length === 2) {
+        const p1 = rawPoints[0];
+        const p2 = rawPoints[1];
+        const dist = Math.max(5, Math.round(haversine(p1, p2)));
+        const exitBearing = calculateBearing(p1, p2);
+        const entryBearing = lastKnownHeading !== null ? lastKnownHeading : exitBearing;
+
+        let defl = (exitBearing - entryBearing) % 360;
+        if (defl > 180) defl -= 360;
+        if (defl < -180) defl += 360;
+
+        const absDefl = Math.round(Math.abs(defl));
+        const dir = defl >= 0 ? 'R' : 'L';
+        const dirWord = dir === 'R' ? 'Right' : 'Left';
+
+        let grade = 6;
+        if (absDefl >= 95) grade = 1;
+        else if (absDefl >= 70) grade = 2;
+        else if (absDefl >= 45) grade = 3;
+        else if (absDefl >= 28) grade = 4;
+        else if (absDefl >= 14) grade = 5;
+        else grade = 6;
+
+        let callLabel = dir + grade;
+        let spokenLabel = dirWord + ' ' + grade;
+        if (absDefl >= calibration.hairpinAngleMin) {
+          callLabel = 'H' + dir;
+          spokenLabel = 'Hairpin ' + dirWord;
+        } else if (absDefl >= 75 && absDefl <= 100) {
+          callLabel = 'SQUARE ' + dir;
+          spokenLabel = 'Square ' + dirWord;
+        }
+
+        return {
+          dir,
+          grade,
+          text: callLabel,
+          spoken: spokenLabel,
+          segmentLen: dist,
+          radiusMeters: Math.round(dist / (Math.max(1, absDefl * (Math.PI / 180)))),
+          deflectionDeg: absDefl
+        };
       }
 
       const step = calibration.chordStepMeters;
@@ -845,7 +909,6 @@
       const points = filtered.length >= 3 ? filtered : rawPoints;
       const metricRaw = projectToMeters(points);
       const metric = smoothPath(metricRaw, 3);
-
       const n = points.length;
 
       let totalDefl = 0;
@@ -1031,8 +1094,6 @@
         lon: midPt.lon
       });
 
-      allStageTrackPoints.push(...points);
-
       speakCall(res.spoken);
 
       lastCornerEndPoint = points[points.length - 1];
@@ -1105,13 +1166,34 @@
         renderFeed();
         return;
       }
+      
+      // RECALCULATE ENTIRE STAGE DISTANCE ON NOTE DELETION
       if (action === 'delete') {
         capturedNotes.splice(index, 1);
+        let runningDist = 0;
+        for (let i = 0; i < capturedNotes.length; i++) {
+          if (i > 0 && capturedNotes[i - 1].coords && capturedNotes[i].coords) {
+            capturedNotes[i].leadStraightDist = Math.round(
+              haversine(capturedNotes[i - 1].coords[capturedNotes[i - 1].coords.length - 1], capturedNotes[i].coords[0])
+            );
+            runningDist += capturedNotes[i].leadStraightDist;
+          } else {
+            capturedNotes[i].leadStraightDist = 0;
+          }
+          runningDist += capturedNotes[i].segmentLen;
+          capturedNotes[i].accumDist = Math.round(runningDist);
+        }
+        totalStageDistance = runningDist;
+        lastCornerEndPoint = capturedNotes.length > 0 
+          ? capturedNotes[capturedNotes.length - 1].coords[capturedNotes[capturedNotes.length - 1].coords.length - 1] 
+          : null;
         activeEditIndex = null;
         renderFeed();
         if (currentActiveView === 'map') initOrUpdateMap();
+        showToast('Note deleted & stage distances recalculated.');
         return;
       }
+
       if (action === 'speak') {
         speakCall(note.spoken || note.text);
         return;
@@ -1120,6 +1202,7 @@
         currentActiveView = 'map';
         feedViewWrap.style.display = 'none';
         mapView.classList.add('active');
+        viewToggleBtn.classList.add('view-active');
         viewToggleBtn.innerText = '📋 FEED';
         initOrUpdateMap(index);
         return;
@@ -1173,7 +1256,9 @@
         map = L.map('map-view', { zoomControl: true, attributionControl: false }).setView([52.120, -4.078], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
       }
-      map.invalidateSize();
+
+      // Safe delayed map invalidation prevents grey tile rendering
+      setTimeout(() => { if (map) map.invalidateSize(); }, 120);
 
       mapMarkers.forEach(m => m.remove());
       mapMarkers = [];
@@ -1190,7 +1275,6 @@
 
       if (lineCoords.length > 1) {
         routePolyline = L.polyline(lineCoords, { color: '#0052cc', weight: 5, opacity: 0.85 }).addTo(map);
-        map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
       }
 
       const createFlagIcon = (num) => {
@@ -1238,21 +1322,32 @@
 
         marker.bindPopup(popupHtml, { closeButton: false });
 
-        if (targetNoteIndex === idx || (targetNoteIndex === null && targetMarkerToOpen === null)) {
+        if (targetNoteIndex === idx) {
           targetMarkerToOpen = marker;
         }
       });
 
       window.__closePopup = () => map.closePopup();
 
-      if (targetMarkerToOpen) {
-        setTimeout(() => targetMarkerToOpen.openPopup(), 300);
+      // Pan directly to target note if requested, otherwise fit stage route
+      if (targetNoteIndex !== null && capturedNotes[targetNoteIndex]) {
+        const tn = capturedNotes[targetNoteIndex];
+        map.setView([tn.lat, tn.lon], 17);
+        if (targetMarkerToOpen) {
+          setTimeout(() => targetMarkerToOpen.openPopup(), 250);
+        }
+      } else if (lineCoords.length > 1) {
+        map.fitBounds(routePolyline.getBounds(), { padding: [40, 40] });
+      } else if (rollingBuffer.length > 0) {
+        map.setView([rollingBuffer[rollingBuffer.length - 1].lat, rollingBuffer[rollingBuffer.length - 1].lon], 16);
       }
     }
 
     function startGPS() {
       if (!('geolocation' in navigator)) {
         showToast('Geolocation is not supported by your device.');
+        accVal.innerText = 'NO GPS';
+        accVal.className = 'stat-val acc bad';
         return;
       }
 
@@ -1263,7 +1358,7 @@
           const accuracy = Math.round(pos.coords.accuracy);
           const rawSpeed = pos.coords.speed || 0;
           const speed = speedUnit === 'mph' ? Math.round(rawSpeed * 2.23694) : Math.round(rawSpeed * 3.6);
-          const timestamp = pos.timestamp;
+          const timestamp = pos.timestamp || Date.now();
 
           accVal.innerText = '±' + accuracy + 'm';
           accVal.className = 'stat-val acc ' + (accuracy <= 6 ? 'good' : accuracy <= 15 ? 'warn' : 'bad');
@@ -1271,22 +1366,49 @@
 
           const pt = { lat, lon, timestamp, speed: rawSpeed, accuracy, altitude: pos.coords.altitude || 0 };
 
+          if (rollingBuffer.length > 0) {
+            const prevPt = rollingBuffer[rollingBuffer.length - 1];
+            if (haversine(prevPt, pt) > 1.0) {
+              lastKnownHeading = calculateBearing(prevPt, pt);
+            }
+          }
+
           rollingBuffer.push(pt);
           while (rollingBuffer.length > 0 && (timestamp - rollingBuffer[0].timestamp) > 2000) {
             rollingBuffer.shift();
           }
 
+          // RECORD CONTINUOUS STAGE TRACK POINTS FOR FULL ROUTE INTEGRITY
+          if (allStageTrackPoints.length > 0 || isRecordingCorner) {
+            allStageTrackPoints.push(pt);
+          }
+
           if (isRecordingCorner) {
             currentCornerPoints.push(pt);
-            if (currentCornerPoints.length >= 3) {
+            if (currentCornerPoints.length >= 2) {
               const preview = evaluateCorner(currentCornerPoints);
               btnLabel.innerText = preview.text;
             }
           }
         },
-        (err) => console.warn('GPS Error:', err),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 6000 }
+        (err) => {
+          console.warn('GPS Error:', err);
+          accVal.innerText = 'ERR';
+          accVal.className = 'stat-val acc bad';
+          showToast('GPS Error: ' + (err.message || 'Please enable Location permissions'));
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
       );
+    }
+
+    function escapeXml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
     }
 
     exportGpxBtn.addEventListener('click', () => {
@@ -1313,13 +1435,13 @@
         const cmt = '#' + cornerNum + ' ' + (n.dir || n.type) + ' | Seg: ' + n.segmentLen + 'm | Stage: ' + n.accumDist + 'm | Angle: ' + (n.deflectionDeg || 0) + 'deg | Radius: ' + (n.radiusMeters || 0) + 'm';
 
         waypointsXml += 
-          '  <wpt lat="' + lat.toFixed(7) + '" lon="' + lon.toFixed(7) + '">\n' +
-          '    <name>' + n.text + '</name>\n' +
-          '    <cmt>' + cmt + '</cmt>\n' +
-          '    <desc>' + n.text + ' - ' + cmt + '</desc>\n' +
+          '  <wpt lat="' + Number(lat).toFixed(7) + '" lon="' + Number(lon).toFixed(7) + '">\n' +
+          '    <name>' + escapeXml(n.text) + '</name>\n' +
+          '    <cmt>' + escapeXml(cmt) + '</cmt>\n' +
+          '    <desc>' + escapeXml(n.text + ' - ' + cmt) + '</desc>\n' +
           '    <sym>Flag, Blue</sym>\n' +
           '    <extensions>\n' +
-          '      <cornerCall>' + n.text + '</cornerCall>\n' +
+          '      <cornerCall>' + escapeXml(n.text) + '</cornerCall>\n' +
           '      <cornerAngleDeg>' + (n.deflectionDeg || 0) + '</cornerAngleDeg>\n' +
           '      <radiusMeters>' + (n.radiusMeters || 0) + '</radiusMeters>\n' +
           '      <segmentLengthMeters>' + n.segmentLen + '</segmentLengthMeters>\n' +
@@ -1332,7 +1454,7 @@
       const pts = allStageTrackPoints.length > 0 ? allStageTrackPoints : (capturedNotes.flatMap(n => n.coords || []));
       pts.forEach((p) => {
         trackXml += 
-          '      <trkpt lat="' + p.lat.toFixed(7) + '" lon="' + p.lon.toFixed(7) + '">\n' +
+          '      <trkpt lat="' + Number(p.lat).toFixed(7) + '" lon="' + Number(p.lon).toFixed(7) + '">\n' +
           '        <ele>' + (p.altitude || 0) + '</ele>\n' +
           '        <time>' + (p.timestamp ? new Date(p.timestamp).toISOString() : now) + '</time>\n' +
           '        <speed>' + (p.speed || 0).toFixed(2) + '</speed>\n' +
@@ -1375,10 +1497,10 @@
 
       let csv = "Index,Type,Note Call,Segment Length (m),Cumulative Distance (m),Radius (m),Deflection (deg)\n";
       capturedNotes.forEach((n, idx) => {
-        csv += (idx + 1) + ',' + n.type + ',"' + n.text + '",' + n.segmentLen + ',' + n.accumDist + ',' + (n.radiusMeters || '') + ',' + (n.deflectionDeg || '') + '\n';
+        csv += (idx + 1) + ',' + n.type + ',"' + n.text.replace(/"/g, '""') + '",' + n.segmentLen + ',' + n.accumDist + ',' + (n.radiusMeters || '') + ',' + (n.deflectionDeg || '') + '\n';
       });
 
-      const blob = new Blob([csv], { type: 'text/csv' });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1391,11 +1513,12 @@
     });
 
     clearBtn.addEventListener('click', () => {
-      if (!capturedNotes.length) return;
+      if (!capturedNotes.length && !allStageTrackPoints.length) return;
       capturedNotes = [];
       allStageTrackPoints = [];
       totalStageDistance = 0;
       lastCornerEndPoint = null;
+      lastKnownHeading = null;
       activeEditIndex = null;
       renderFeed();
       if (currentActiveView === 'map') initOrUpdateMap();
